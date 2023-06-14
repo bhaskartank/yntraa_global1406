@@ -1,0 +1,78 @@
+heat_template_version: newton
+
+description: Template that installs a cluster of servers
+
+parameters:
+  stackname:
+    type: string
+    label: Stackname
+    description: Stackname to be used.
+    default: stack-name   
+  internal_network_id:
+    type: string
+    description: tenant internal net id
+    default: int_net
+  sec_group_name:
+    type: string
+    description: security group name
+    default: default
+  flavor_name:
+    type: string
+    description: NKS host flavor name
+    default: Small-V
+  image_name:
+    type: string
+    description: NKS host image name
+    default: Charu-Ubuntu18.04
+  boot_vol_size:
+    type: number
+    description: The size of the Cinder boot volume
+    default: 70
+  cluster_role:
+    type: string
+    description: NKS cluster role
+    default: --controlplane  
+  cluster_size:
+    type: number
+    label: Cluster size
+    description: Number of instances in cluster. 
+  join_command:
+    type: string
+    description: NKS cluster join command
+  availability_zone:
+    type: string
+    description: node availability zone
+    default: nova
+resources:
+  app_cluster:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: cluster_size }
+      resource_def:
+        type: OS::YntraaCLOUD::NODESERVER
+        properties:
+          flavor_name: {get_param: flavor_name}
+          image_name: {get_param: image_name}
+          availability_zone: { get_param: availability_zone }
+          boot_vol_size: {get_param: boot_vol_size}
+          internal_network_id: {get_param: internal_network_id}
+          cluster_role: {get_param: cluster_role}
+          join_command: {get_param: join_command}
+          name: {get_param: stackname}
+outputs:
+  server_name:
+    description: >
+      List of server names that are part of the group.
+    value: {get_attr: [app_cluster, name]}
+  server_ip:
+    description: >
+      List of server IPs that are part of the group.
+    value: {get_attr: [app_cluster, ip]}
+  server_private_ip:
+    description: >
+      List of server IPs that are part of the group.
+    value: {get_attr: [app_cluster, ip]}  
+  server_id:
+    description: >
+      List of server IDs that are part of the group.
+    value: {get_attr: [app_cluster, id]}

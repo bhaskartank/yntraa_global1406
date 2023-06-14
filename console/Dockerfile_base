@@ -1,0 +1,5 @@
+# Stage 1 - the build react app
+FROM node:12.22.10-alpine as build-deps
+WORKDIR /app
+COPY package.json ./
+RUN npm install

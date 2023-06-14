@@ -1,0 +1,247 @@
+version: '3'
+services:
+
+    traefik:
+        image: traefik
+        command: --api --api.dashboard --api.insecure --providers.docker --providers.docker.exposedbydefault=false --log.level=DEBUG
+        ports:
+            - "8080:8080"
+            - "80:80"
+        networks:
+            - frontend
+            - backend
+        restart: unless-stopped
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        labels:
+            - "traefik.enable=true"
+            - "traefik.port=8080"
+            - "traefik.frontend.rule=Host:dashboard.yntraa.com"
+    
+    api:
+        build: ./yntraa-platform
+        image: coredgeio/yntraa_platform
+        restart: unless-stopped
+        links:
+            - postgres:postgres
+            - redis:redis
+            - socketio:socketio
+            - celery:celery
+        environment:
+            - SMS_SERVICE_USERPIN=asd
+        networks:
+            - frontend
+            - backend
+        volumes:
+             - ./yntraa-platform/app/:/opt/www/app/
+             - ./yntraa-platform/migrations/:/opt/www/migrations/
+             - ./yntraa-platform/config.py:/opt/www/config.py
+             - ./yntraa-platform/flask_restplus_patched/:/opt/www/flask_restplus_patched/
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=api"
+            - "traefik.port=5000"
+            - "traefik.http.routers.api.rule=Host(`api.yntraa.com`)"
+
+    adminapi:
+        build: ./yntraa-admin-platform
+        image: coredgeio/yntraa_admin_platform
+        restart: unless-stopped
+        links:
+            - postgres:postgres
+            - redis:redis
+            - socketio:socketio
+            - admin-celery:admin-celery
+        networks:
+            - frontend
+            - backend
+        volumes:
+             - ./yntraa-admin-platform/app/:/opt/www/app/
+             - ./yntraa-admin-platform/migrations/:/opt/www/migrations/
+             - ./yntraa-admin-platform/flask_restplus_patched/:/opt/www/flask_restplus_patched/
+             - ./yntraa-admin-platform/config.py:/opt/www/config.py
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=adminapi"
+            - "traefik.port=5000"
+            - "traefik.http.routers.adminapi.rule=Host(`adminapi.yntraa.com`)"
+
+    celery:
+        image: coredgeio/yntraa_platform
+        restart: unless-stopped
+        links:
+            - postgres:postgres
+            - redis:redis
+            - socketio:socketio
+        command: "celery -A app.celery worker --loglevel=info"
+        user: nobody
+        environment:
+            - SMS_SERVICE_USERPIN=K!pdz8d%2h
+        networks:
+            - frontend
+            - backend
+        volumes:
+             - ./yntraa-platform/app/:/opt/www/app/
+             - ./yntraa-platform/migrations/:/opt/www/migrations/
+             - ./yntraa-platform/config.py:/opt/www/config.py
+        labels:
+            - "traefik.enable=false"
+         
+    admin-celery:
+        image: coredgeio/yntraa_admin_platform
+        restart: unless-stopped
+        links:
+            - postgres:postgres
+            - redis:redis
+            - socketio:socketio
+        command: "celery -A app.celery worker --loglevel=info -B"
+        user: nobody
+        environment:
+            - SMS_SERVICE_USERPIN=test
+            
+        networks:
+            - frontend
+            - backend
+        volumes:
+             - ./yntraa-admin-platform/app/:/opt/www/app/
+             - ./yntraa-admin-platform/migrations/:/opt/www/migrations/
+             - ./yntraa-admin-platform/config.py:/opt/www/config.py
+             - ./yntraa-admin-platform/flask_restplus_patched/:/opt/www/flask_restplus_patched/
+        labels:
+            - "traefik.enable=false"
+
+    socketio:
+        build: ./socketio
+        image: coredgeio/socketio_sso
+        restart: unless-stopped
+        links:
+            - redis:redis
+        networks:
+            - frontend
+            - backend
+        environment:
+            - SMS_SERVICE_USERPIN=asd
+        volumes:
+             - ./socketio/src:/src
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=socketio"
+            - "traefik.port=5000"
+            - "traefik.http.routers.socketio.rule=Host(`socketio.yntraa.com`)"
+            
+    redis:
+        image: redis:latest
+        restart: unless-stopped
+        environment:
+            - ALLOW_EMPTY_PASSWORD=yes    
+        networks:
+            - backend
+        labels:
+            - "traefik.enable=false"
+
+    postgres:
+        image: postgres:10.1
+        restart: unless-stopped
+        environment:
+            - POSTGRES_DB=apidb
+            - POSTGRES_USER=api_user
+            - POSTGRES_PASSWORD=password
+        ports:
+            - "54321:5432"
+        networks:
+            - backend
+        volumes:
+            - ./yntraa-platform/data/pgdata:/var/lib/postgresql/data
+            - ./yntraa-platform/data/conf/postgres/:/docker-entrypoint-initdb.d/
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=postgres"
+            - "traefik.port=5432"
+            - "traefik.http.routers.postgres.rule=Host(`pg.yntraa.com`)"
+
+    pgadmin:
+        links:
+          - postgres:postgres
+        depends_on:
+            - postgres
+        image: adminer
+        environment:
+            - PGADMIN_DEFAULT_EMAIL=api_user
+            - PGADMIN_DEFAULT_PASSWORD=password
+        volumes:
+           - ./yntraa-platform/data/pgadmin:/root/.pgadmin
+           - ./yntraa-platform/pgdump:/var/lib/pgadmin/storage/api_user
+        networks:
+          - backend
+          - frontend
+        restart: unless-stopped
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=pgadmin"
+            - "traefik.port=8080"
+            - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.yntraa.com`)"
+
+    php-redis-admin:
+        image: faktiva/php-redis-admin:latest
+        environment:
+            - PHPREDMIN_DATABASE_REDIS_0_HOST=redis
+        networks:
+            - backend
+        ports:
+          - 36808:80
+        links:
+            - redis:redis
+        restart: unless-stopped
+        labels:
+            - "traefik.enable=true"
+            - "traefik.backend=php-redis-admin"
+            - "traefik.port=80"
+            - "traefik.http.routers.php-redis-admin.rule=Host(`redisadmin.yntraa.com`)"
+    
+    adminconsole:
+        #build: ./admin-console
+        image: coredgeio/yntraa_admin_console
+        restart: unless-stopped
+        links:
+            - adminapi:adminapi
+        environment:
+            - REACT_APP_API_URL=http://adminapi.yntraa.com
+            - REACT_APP_OIDC_AUTH_URL=http://auth.yntraa.com
+            - REACT_APP_OIDC_REALM=cloud
+            - REACT_APP_OIDC_CLIENT_ID=ccp-react
+            - REACT_APP_OIDC_ENABLED=false
+            - REACT_APP_SOCKET_IO=http://socketio.yntraa.com
+        networks:
+            - frontend
+        labels:
+            - "traefik.enable=true"
+            - "traefik.frontend=adminconsole" 
+            - "traefik.port=80"
+            - "traefik.http.routers.adminconsole.rule=Host(`admin-console.yntraa.com`)"
+
+    console:
+        #build: ./console
+        image: coredgeio/yntraa_console
+        restart: unless-stopped
+        links:
+            - api:api
+        environment:
+            - REACT_APP_API_URL=http://api.yntraa.com
+            - REACT_APP_OIDC_AUTH_URL=http://auth.yntraa.com
+            - REACT_APP_OIDC_REALM=cloud
+            - REACT_APP_OIDC_CLIENT_ID=ccp-react
+            - REACT_APP_OIDC_ENABLED=false
+            - REACT_APP_SOCKET_IO=http://socketio.yntraa.com
+        networks:
+            - frontend
+        labels:
+            - "traefik.enable=true"
+            - "traefik.frontend=api-ui"
+            - "traefik.port=80"
+            - "traefik.http.routers.console.rule=Host(`console.yntraa.com`)"
+
+networks:
+    frontend:
+        driver: bridge
+    backend:
+        driver: bridge

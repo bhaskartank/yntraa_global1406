@@ -1,0 +1,104 @@
+heat_template_version: newton
+
+description: Yntraa Cloud - deploy project tenant.
+
+parameters:
+  tenant_name:
+    type: string
+    description: tenant name
+    default: yntraa_cloud_default
+  tenant_description:
+    type: string
+    description: tenant description
+    default: yntraa_cloud_default
+  tenant_user:
+    type: string
+    description: tenant user
+    default: admin
+    #default: { get_param: tenant_user }
+  tenant_user_role:
+    type: string
+    description: tenant user roles
+    default: heat_stack_owner
+  public_net_name:
+    type: string
+    description: public/external net name
+    default: external
+  tenant_net_name:
+    type: string
+    description: tenant internal net name
+    default: int_net
+  tenant_subnet_name:
+    type: string
+    description: tenant internal subnet name
+    default: int_subnet
+  tenant_subnet_cidr:
+    type: string
+    description: CIDR of tenant internal subnet name
+    default: 192.168.3.0/24
+  tenant_subnet_gateway:
+    type: string
+    description: gateway for tenant internal subnet
+    default: 192.168.3.1
+  tenant_router_name:
+    type: string
+    description: tenant router name
+    default: tenant_router
+  sec_group_name:
+    type: string
+    description: security group name
+    default: sec_group
+
+resources:
+  tenant:
+    type: OS::Keystone::Project
+    properties:
+      name: { get_param: tenant_name }
+      domain: default
+      description: {get_param: tenant_description }
+  user:
+      type: OS::Keystone::UserRoleAssignment
+      properties:
+        user: { get_param: tenant_user }
+        roles:
+        - {project: {get_resource: tenant}, role: admin}
+  tenant_net:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: tenant_net_name }
+      tenant_id: { get_resource: tenant }
+  tenant_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { get_param: tenant_subnet_name }
+      network_id: { get_resource: tenant_net }
+      cidr: { get_param: tenant_subnet_cidr }
+      gateway_ip: { get_param: tenant_subnet_gateway }
+      enable_dhcp: True
+      tenant_id: { get_resource: tenant }
+  tenant_router:
+    type: OS::Neutron::Router
+    properties:
+      name: { get_param: tenant_router_name }
+      external_gateway_info:
+        network: { get_param: public_net_name }
+      value_specs:
+        tenant_id: { get_resource: tenant }
+  tenant_router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: tenant_router }
+      subnet_id: { get_resource: tenant_subnet }
+outputs:
+  tenant_id:
+    description: Project ID
+    value: { get_resource: tenant }
+  network_id:
+    description: Network ID
+    value: { get_resource: tenant_net }
+  subnet_id:
+    description: Project Subnet ID
+    value: { get_resource: tenant_subnet }
+  router_id:
+    description: Router ID
+    value: { get_resource: tenant_router }

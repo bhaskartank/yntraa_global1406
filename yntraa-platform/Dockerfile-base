@@ -1,0 +1,18 @@
+FROM alpine
+
+# install openssl
+RUN apk add --update libressl-dev && \
+    rm -rf /var/cache/apk/*
+
+RUN apk add --no-cache python3 libvirt-client libpq postgresql-dev && \
+    python3 -m ensurepip && \
+    rm -r /usr/lib/python*/ensurepip && \
+    pip3 install --upgrade pip setuptools && \
+    if [ ! -e /usr/bin/pip ]; then ln -s pip3 /usr/bin/pip ; fi && \
+    if [[ ! -e /usr/bin/python ]]; then ln -sf /usr/bin/python3 /usr/bin/python; fi && \
+    rm -r /root/.cache
+
+ENV API_SERVER_HOME=/opt/www
+WORKDIR "$API_SERVER_HOME"
+
+RUN apk add --no-cache --virtual=.build_dependencies musl-dev gcc python3-dev libffi-dev linux-headers 

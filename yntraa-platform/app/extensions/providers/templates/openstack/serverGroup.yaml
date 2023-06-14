@@ -1,0 +1,139 @@
+heat_template_version: newton
+
+description: Template that installs a cluster of servers with a load balancer.
+
+parameters:
+  stackname:
+    type: string
+    label: Stackname
+    description: Stackname to be used.
+    default: scaling-group
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server.
+    default: Docker
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: Small-I
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: 41673c97-25a0-4884-9de6-c880e5878b77
+  lb_private_network:
+    type: string
+    label: Private internal network name or ID
+    description: Network to attach lb instance to.
+    default: 41673c97-25a0-4884-9de6-c880e5878b77
+  cluster_size:
+    type: number
+    label: Cluster size
+    description: Number of instances in cluster.
+    default: 2
+  public_network:
+    type: string
+    description: public/external net name
+    default: floating_net
+  lb_sec_group_name:
+    type: string
+    description: security group name
+    default: lb_sec_group
+  lb_flavor:
+    type: string
+    description: Gateway VM flavor name
+    default: gateway-flavor
+  lb_image:
+    type: string
+    description: Gateway VM image name
+    default: Docker
+  lb_vm_name:
+    type: string
+    description: Gateway VM name
+    default: lb_vm
+  docker_registry:
+    type: string
+    description: Docker registry
+    default: 164.100.61.35:5000
+  boot_vol_size:
+    type: number
+    description: The size of the Cinder boot volume
+    default: 70
+  availability_zone:
+    type: string
+    description: LB availability zone
+    default: nova
+  userdata:
+    type: string
+    description: server userdata
+    default: userdata
+
+
+resources:
+  anti-affinity_group:
+    type: OS::Nova::ServerGroup
+    properties:
+      name: hosts on separate compute nodes
+      policies:
+       - soft-anti-affinity
+  app_cluster:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: cluster_size }
+      resource_def:
+        type: OS::YntraaCLOUD::SERVER
+        properties:
+          affinity_group: {get_resource: anti-affinity_group}
+          flavor: {get_param: flavor}
+          image: {get_param: image}
+          boot_vol_size: {get_param: boot_vol_size}
+          userdata: {get_param: userdata}
+          name:
+            list_join:
+            - '-'
+            - - {get_param: stackname}
+              - '%index%'
+          private_network: {get_param: private_network}
+  load_balancer:
+    type: OS::YntraaCLOUD::LB
+    properties:
+      image: { get_param: lb_image }
+      flavor: { get_param: lb_flavor }
+      private_network: { get_param: lb_private_network}
+      public_network: { get_param: public_network }
+      sec_group_name: { get_param: lb_sec_group_name }
+      docker_registry: { get_param: docker_registry }
+      lb_vm_name: { get_param: lb_vm_name }
+      availability_zone: { get_param: availability_zone }
+      boot_vol_size: {get_param: boot_vol_size}
+      servers: { get_attr: [app_cluster, ip] }
+outputs:
+  server_name:
+    description: >
+      List of server names that are part of the group.
+    value: {get_attr: [app_cluster, name]}
+  server_ip:
+    description: >
+      List of server IPs that are part of the group.
+    value: {get_attr: [app_cluster, ip]}
+  server_id:
+    description: >
+      List of server IDs that are part of the group.
+    value: {get_attr: [app_cluster, id]}
+  internal_security_group_id:
+    description: Internal Security Group ID for LB
+    value: {get_attr: [load_balancer, internal_security_group_id]}
+  lb_vm_id:
+    description: LB VM
+    value: {get_attr: [load_balancer, lb_vm_id]}
+  lb_name:
+    description: Name of the LB instance.
+    value: {get_attr: [load_balancer, name]}
+  lb_private_ip:
+    description: The IP address of the LB instance.
+    value: {get_attr: [load_balancer, private_ip]}
+  lb_floating_ip:
+    description: The IP address of the LB instance.
+    value: {get_attr: [load_balancer, floating_ip]}

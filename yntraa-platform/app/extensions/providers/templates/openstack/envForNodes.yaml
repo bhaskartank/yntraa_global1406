@@ -1,0 +1,2 @@
+resource_registry:
+  "OS::YntraaCLOUD::NODESERVER": file:///opt/www/app/extensions/providers/templates/openstack/lib/nks_add_host.yaml

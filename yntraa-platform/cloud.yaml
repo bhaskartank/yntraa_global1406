@@ -1,0 +1,39 @@
+providers:
+  noida-1:
+    uuid: 547ee1cc-a56f-4fb1-9567-7c7cdfa7ce6a
+    cloud_name: south-1
+    default: True
+    provider_location: Noida
+    auth:
+      auth_url: http://43.204.110.93:5000/v3
+      username: admin
+      password: 586ba498b984415d36607c893b1cf342985321c409dee
+      project_name: admin
+      project_domain_id: default
+      user_domain_id: default
+    region_name: RegionOne
+    type: openstack
+    identity_api_version: 3
+    interface: public
+    provider_id: 17
+
+
+  docker:
+    cloud_name: OSP-PS-NDCSP
+    provider_location: Noida
+    auth:
+      auth_url: http://10.247.108.6:5000/v2.0
+      username: admin
+      password: redhat321
+      project_name: admin
+      project_domain_id: default
+      user_domain_id: default
+    region_name: RegionOne
+    identity_api_version: 2
+    interface: public
+    docker_registry : 10.247.108.56:5000
+    provider_id: 18
+
+
+
+

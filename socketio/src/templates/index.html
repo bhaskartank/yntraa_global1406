@@ -1,0 +1,38 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>Cloud Application Logs</title>
+    <script type="text/javascript" src="//code.jquery.com/jquery-2.1.4.min.js"></script>
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.4/socket.io.slim.js"></script>
+    <script type="text/javascript" charset="utf-8">
+        $(document).ready(function(){
+            namespace = '/';
+            var socket = io.connect('http://' + document.domain + ':' + location.port);
+            socket.on('connect', function() {
+
+                socket.emit('send_msg', {data: 'I\'m connected!'});
+            });+
+            socket.on('disconnect', function() {
+                $('#log').append('<br>Disconnected');
+            });
+            socket.on('send_msg', function(msg) {
+                console.log(msg);
+                $('#log').append('<br>Received: ' + msg.data);
+            });
+            socket.on('send_log', function(msg) {
+                $('#log').append('<br>Received: ' + msg.data);
+            });
+            socket.on('serve_forever', function(msg) {
+                console.log(msg);
+                $('#log').append('<br>Received: ' + msg.data);
+            });
+
+        });
+    </script>
+</head>
+<body>
+    <h1>Cloud Application Logs</h1>
+    <h2>Log:</h2>
+    <div><p id="log"></p></div>
+</body>
+</html>

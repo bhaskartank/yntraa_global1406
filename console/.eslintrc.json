@@ -1,0 +1,54 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "commonjs": true,
+    "es6": true,
+    "jest": true,
+    "node": true
+  },
+  "extends": ["plugin:react/recommended", "standard", "prettier", "eslint:recommended", "plugin:@typescript-eslint/eslint-recommended", "plugin:@typescript-eslint/recommended"],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaFeatures": {
+      "jsx": true
+    },
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "plugins": ["react", "react-hooks", "@typescript-eslint", "unused-imports"],
+  "rules": {
+    "no-unused-vars": "off",
+    "spaced-comment": "off",
+    "@typescript-eslint/no-unused-vars": "warn",
+    "unused-imports/no-unused-imports-ts": "warn",
+    "react-hooks/exhaustive-deps": "warn",
+    "no-empty": "warn",
+    "@typescript-eslint/rule-name": "off",
+    "react/react-in-jsx-scope": "off",
+    "no-use-before-define": "warn",
+    "react/display-name": "off",
+    "@typescript-eslint/no-explicit-any": ["off"],
+    "no-anonymous-default-export": "off",
+    "camelcase": "off",
+    "dot-notation": "warn",
+    "@typescript-eslint/camelcase": ["off"],
+    "@typescript-eslint/no-empty-function": "warn",
+    "@typescript-eslint/ban-types": "warn",
+    "@typescript-eslint/no-empty-interface": "warn",
+    "no-console": ["warn", { "allow": ["info", "error"] }],
+    "@typescript-eslint/ban-ts-comment": "warn",
+    "prefer-const": [
+      "warn",
+      {
+        "destructuring": "any",
+        "ignoreReadBeforeAssign": false
+      }
+    ]
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
+  }
+}

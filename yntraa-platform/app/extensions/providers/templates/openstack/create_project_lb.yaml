@@ -1,0 +1,115 @@
+heat_template_version: newton
+
+description: Yntraa Cloud - deploy LB VM.
+
+parameters:
+  internal_network_id:
+    type: string
+    description: tenant internal net id
+    default: int_net
+  sec_group_name:
+    type: string
+    description: security group name
+    default: lb_sec_group
+  flavor_name:
+    type: string
+    description: LB VM flavor name
+    default: gateway-flavor
+  image_name:
+    type: string
+    description: LB VM image name
+    default: Yntraa-LB-V2
+  lb_vm_name:
+    type: string
+    description: LB VM name
+    default: lb_vm
+  boot_vol_size:
+    type: number
+    description: The size of the Cinder boot volume
+    default: 10
+  availability_zone:
+    type: string
+    description: LB availability zone
+    default: nova
+  lb_init_conf:
+    type: string
+    description: LB Init script
+    default:
+  lb_config_path:
+    type: string
+    description: LB Init script
+    default: /var/lib/caddy/Caddyfile
+  lb_env_conf:
+    type: string
+    description: LB Env file
+    default: LB_BACKENDS=:1234
+  lb_env_path:
+    type: string
+    description: LB env file path
+    default: /var/lib/caddy/.env
+  lb_version:
+    type: string
+    description: LB Version
+    default: v2
+resources:
+  lb_config:
+    type: OS::Heat::CloudConfig
+    properties:
+      cloud_config:
+        write_files:
+        - path: {get_param: lb_config_path}
+          content: {get_param: lb_init_conf}
+  lb_env:
+    type: OS::Heat::CloudConfig
+    properties:
+      cloud_config:
+        write_files:
+        - path: {get_param: lb_env_path}
+          content: {get_param: lb_env_conf}
+  server_init:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: {get_resource: lb_config}
+      - config: {get_resource: lb_env}
+  lb_secgroup_gateway:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: {get_param: sec_group_name}
+      description: Enable external traffic on LB.
+  green_port: 
+    type: OS::Neutron::Port 
+    properties: 
+      network: { get_param: internal_network_id }
+      security_groups: [{ get_resource: lb_secgroup_gateway }]
+  lb_vol:
+    type: OS::Cinder::Volume
+    properties:
+      size: { get_param: boot_vol_size }
+      image: { get_param: image_name }
+  lb_vm:
+    depends_on: [lb_secgroup_gateway,green_port,lb_vol] 
+    type: OS::Nova::Server 
+    properties: 
+      name: { get_param: lb_vm_name }  
+      image: { get_param: image_name } 
+      flavor: { get_param: flavor_name } 
+      availability_zone: { get_param: availability_zone }
+      block_device_mapping: [{"volume_id": { get_resource: lb_vol },
+                        "delete_on_termination": true, 
+                        "device_name": "vda"}]
+      networks:
+      - port: { get_resource: green_port }
+      metadata:
+        gateway_device: "yes"
+        device_type: "lb"
+        device_version: { get_param: lb_version }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_resource: server_init }
+outputs:
+  internal_security_group_id:
+    description: Internal Security Group ID
+    value: { get_resource: lb_secgroup_gateway }
+  lb_vm_id:
+    description: LB VM
+    value: { get_resource: lb_vm }

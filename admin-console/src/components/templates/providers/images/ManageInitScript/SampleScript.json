@@ -1,0 +1,3 @@
+{
+  "value": "#cloud-config\n  hostname: [hostname]\n  manage_etc_hosts: true\n  users:\n    - name: [username]\n      password: [password]\n      sudo: ['ALL=(ALL) ALL']\n      groups: sudo\n      shell: /bin/bash\n      ssh_pwauth: True\n      lock_passwd: False\n      plain_text_passwd: [password]\n  apt:\n      preserve_sources_list: true\n  runcmd:\n    - curl -LO http://x.x.x.x/init.sh >> init.sh\n    - chmod +x init.sh\n    - ./init.sh <optional-parameters>\n"
+}

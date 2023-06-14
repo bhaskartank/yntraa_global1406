@@ -1,0 +1,129 @@
+heat_template_version: rocky
+
+description: Template that installs a cluster of contoller.
+
+parameters:
+  stackname:
+    type: string
+    label: Stackname
+    description: Stackname to be used.
+    default: nks-cluster
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: int_net
+  controller_sg_name:
+    type: string
+    description: Name of controller security group name
+    default: default
+  controller_image:
+    type: string
+    label: Controller Image name or ID
+    description: Image to be used for server.
+    default: cirros-0.4.0-x86_64-disk
+  controller_flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the Controller instance.
+    default: Medium-I
+  controller_count:
+    type: number
+    label: controller nodes in cluster
+    description: Number of  Controller instances in cluster.
+    default: 3
+  controller_availability_zone:
+    type: string
+    description: Controller availability zone
+    default: nova
+  controller_block_size:
+    type: string
+    description: Controller Volume Block Size
+    default: 70
+  controller_userdata:
+    type: string
+    description: Controller userdata
+    default: echo $hostname
+  
+resources:
+
+  nks_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: NKS security group
+      name: {get_param: stackname}
+
+  anti-affinity-group:
+    type: OS::Nova::ServerGroup
+    properties:
+      name:
+        list_join:
+        - '-'
+        - - {get_param: stackname}
+          - 'soft-anti-affinity-controller'
+
+      policies:
+       - soft-anti-affinity
+
+  controller_nodes:
+    depends_on:
+    - anti-affinity-group
+    - nks_security_group
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: controller_count }
+      resource_def:
+        type: OS::YntraaCLOUD::CONTROLLER
+        properties:
+          affinity_group: {get_resource: anti-affinity-group}
+          flavor_name: {get_param: controller_flavor}
+          image_name: {get_param: controller_image}
+          boot_vol_size: {get_param: controller_block_size}
+          internal_network_id: { get_param: private_network}
+          controller_sg_name: {get_param: controller_sg_name}
+          nks_sec_group_name: {get_resource: nks_security_group}
+          controller_availability_zone: { get_param: controller_availability_zone}
+          controller_userdata : { get_param: controller_userdata}
+          name:
+            list_join:
+            - '-'
+            - - {get_param: stackname}
+              - 'c%index%'
+
+outputs:
+    controller_name:
+      description: >
+        List of server names that are part of the controller group.
+      value: {get_attr: [controller_nodes, name]}
+    controller_ip:
+      description: >
+        List of server IPs that are part of the controller group.
+      value: {get_attr: [controller_nodes, ip]}
+    controller_id:
+      description: >
+        List of server IDs that are part of the controller group.
+      value: {get_attr: [controller_nodes, id]}
+    affinity_group_id:
+      description: Controller affinity Group ID
+      value: { get_resource: anti-affinity-group }
+    affinity_group_name:
+      description: Controller affinity Group Name
+      value: { get_attr: [anti-affinity-group, show,  name] }
+    nks_security_group_id:
+      description: NKS SecurityGroup ID
+      value: { get_resource: nks_security_group }
+    nks_security_group_name:
+      description: NKS SecurityGroup Name
+      value: { get_attr: [nks_security_group, show, name] }
+    controller_volume_name:
+      description: >
+        Name of the my Controller Volume.
+      value: {get_attr: [controller_nodes, controller_volume_name]}
+    controller_volume_id:
+      description: >
+        ID of the my Controller Volume.
+      value: {get_attr: [controller_nodes, controller_volume_id]}
+    controller_volume_size:
+      description: >
+        Size of the my Controller Volume.
+      value: {get_attr: [controller_nodes, controller_volume_size]}

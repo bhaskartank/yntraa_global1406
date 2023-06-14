@@ -1,0 +1,30 @@
+{$LB_ADDRESS}
+header -Server
+reverse_proxy /* {$LB_BACKENDS} {
+    # load balancing
+    lb_policy {$LB_POLICY} {$LB_POLICY_OPTIONS}
+    lb_try_duration {$LB_TRY_DURATION}
+    lb_try_interval {$LB_TRY_INTERVAL}
+
+    # active health checking
+    {$HEALTH_PATH}
+    {$HEALTH_PORT}
+    {$HEALTH_INTERVAL}
+    {$HEALTH_TIMEOUT}
+    {$HEALTH_STATUS}
+    {$HEALTH_BODY}
+
+    # passive health checking
+    {$FAIL_DURATION}
+    {$MAX_FAILS}
+    {$UNHEALTHY_STATUS}
+    {$UNHEALTHY_LATENCY}
+    {$UNHEALTHY_REQUEST_COUNT}
+
+    # header manipulation
+    {$HEADER_UP}
+    {$HEADER_DOWN}
+    transport http {
+      {$TLS_INSECURE_SKIP_VERIFY}
+    }
+}

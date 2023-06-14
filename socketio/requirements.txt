@@ -1,0 +1,15 @@
+click
+enum-compat
+enum34
+eventlet
+Flask
+greenlet
+gevent
+gevent-websocket
+python-engineio==3.13.2
+python-socketio==4.6.0
+Flask-SocketIO==4.3.1
+six
+Werkzeug
+redis
+kombu

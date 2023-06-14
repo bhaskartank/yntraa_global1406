@@ -1,0 +1,282 @@
+heat_template_version: newton
+
+description: Template that installs a cluster of servers with a load balancer.
+
+parameters:
+  stackname:
+    type: string
+    label: Stackname
+    description: Stackname to be used.
+    default: scaling-group
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server.
+    default: Docker
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: Small-I
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: 41673c97-25a0-4884-9de6-c880e5878b77
+  lb_private_network:
+    type: string
+    label: Private internal network name or ID
+    description: Network to attach lb instance to.
+    default: 41673c97-25a0-4884-9de6-c880e5878b77
+  cluster_size:
+    type: number
+    label: Cluster size
+    description: Number of instances in cluster.
+    default: 2
+  public_network:
+    type: string
+    description: public/external net name
+    default: floating_net
+  lb_sec_group_name:
+    type: string
+    description: security group name
+    default: lb_sec_group
+  lb_flavor:
+    type: string
+    description: Gateway VM flavor name
+    default: gateway-flavor
+  lb_image:
+    type: string
+    description: Gateway VM image name
+    default: gwvm
+  lb_vm_name:
+    type: string
+    description: Gateway VM name
+    default: lb_vm
+  docker_registry:
+    type: string
+    description: Docker registry
+    default: 164.100.61.35:5000
+  port_number:
+    type: number
+    label: Port number
+    description: Port number to proxy.
+    default: 80
+  boot_vol_size:
+    type: number
+    description: The size of the Cinder boot volume
+    default: 70
+resources:
+  anti-affinity_group:
+    type: OS::Nova::ServerGroup
+    properties:
+      name: hosts on separate compute nodes
+      policies:
+       - soft-anti-affinity
+  app_cluster:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: cluster_size }
+      resource_def:
+        type: OS::Nova::Server
+        properties:
+          name:
+            list_join:
+            - '-'
+            - - {get_param: stackname}
+              - '%index%'
+          image: { get_param: image }
+          flavor: { get_param: flavor }
+          networks:
+          - network: { get_param: private_network }
+          scheduler_hints:
+            group: { get_resource: anti-affinity_group }
+  lb_secgroup_gateway:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: {get_param: lb_sec_group_name}
+      description: Enable external traffic on LB.
+      rules: 
+      - remote_ip_prefix: 10.26.0.0/16
+        protocol: icmp 
+        direction: ingress
+        port_range_min: 
+        port_range_max:
+
+      # - direction: egress
+      #   ethertype: IPv4
+      # - remote_ip_prefix: 10.0.0.0/0 
+      #   protocol: tcp 
+      #   port_range_min: 5000 
+      #   port_range_max: 5000
+      # - remote_ip_prefix: 10.0.0.0/0 
+      #   protocol: tcp 
+      #   port_range_min: 22 
+      #   port_range_max: 22
+      # - remote_ip_prefix: 0.0.0.0/0 
+      #   protocol: tcp 
+      #   port_range_min: 80 
+      #   port_range_max: 80
+      # - remote_ip_prefix: 0.0.0.0/0 
+      #   protocol: tcp 
+      #   port_range_min: 443 
+      #   port_range_max: 443
+        
+  floating_ip: 
+    depends_on: [green_port] 
+    type: OS::Neutron::FloatingIP 
+    properties: 
+      floating_network_id: { get_param: public_network } 
+      port_id: { get_resource: green_port } 
+  green_port: 
+    type: OS::Neutron::Port 
+    properties: 
+      network: { get_param: private_network }
+      security_groups: [{ get_resource: lb_secgroup_gateway }]
+  lb_vol:
+    type: OS::Cinder::Volume
+    properties:
+      size: { get_param: boot_vol_size }
+      image: { get_param: lb_image }
+  load_balancer:
+    depends_on: [lb_secgroup_gateway,green_port,lb_vol] 
+    type: OS::Nova::Server 
+    properties: 
+      image: { get_param: lb_image }
+      flavor: { get_param: lb_flavor }
+      block_device_mapping: [{"volume_id": { get_resource: lb_vol },
+                        "delete_on_termination": true, 
+                        "device_name": "vda"}]
+      name: { get_param: lb_vm_name }
+      networks: 
+      - port: { get_resource: green_port } 
+      metadata:
+        servers: { get_attr: [app_cluster, first_address] }
+        gateway_device: "yes"
+        device_type: "lb"
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $docker_registry: { get_param: docker_registry }
+            __port__: { get_param: port_number }
+          template: |
+            #!/bin/bash
+            echo "Configuring the LB..."
+            echo "###################################"
+            echo ""
+            sed -i "s/10.247.108.56:5000/$docker_registry/" /etc/docker/daemon.json
+            systemctl restart docker
+
+            mkdir -p /etc/haproxy
+
+            cat >>/etc/haproxy/haproxy.cfg <<EOF
+            global
+              log 127.0.0.1 local0 notice
+              maxconn 2000
+              daemon
+
+            defaults
+              log     global
+              mode    http
+              option  httplog
+              option  dontlognull
+              retries 3
+              option redispatch
+              timeout connect  5000
+              timeout client  10000
+              timeout server  10000
+
+            frontend localnodes
+              bind *:80
+              mode http
+              default_backend app
+            EOF
+
+            # save haproxy original configuration
+            cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy_base.cfg
+
+            # write an initial empty list of worker servers
+            cat >>/etc/haproxy/servers.json <<EOF
+            []
+            EOF
+
+            # write the update script
+            cat >>/etc/haproxy/update.py <<EOF
+            import sys
+            import json
+            import subprocess
+
+            # load server list from metadata
+            metadata = json.loads(sys.stdin.read())
+            new_servers = json.loads(metadata.get('meta', {}).get('servers', '[]'))
+            if not new_servers:
+                sys.exit(1)  # bad metadata
+
+            # compare against known list of servers
+            current_servers = json.loads(open('/etc/haproxy/servers.json').read())
+            if current_servers == new_servers:
+                sys.exit(0)  # no changes
+
+            # record updated list of servers
+            open('/etc/haproxy/servers.json', 'wt').write(json.dumps(new_servers))
+
+            # generate a new haproxy config file
+            f = open('/etc/haproxy/haproxy.cfg', 'wt')
+            f.write(open('/etc/haproxy/haproxy_base.cfg').read())
+            f.write("""
+            backend app
+              mode http
+              balance roundrobin
+              option forwardfor
+              http-request set-header X-Forwarded-Port %[dst_port]
+              http-request add-header X-Forwarded-Proto https if { ssl_fc }
+            """)
+            for i, server in enumerate(new_servers):
+                f.write('  server server-{0} {1}:{2}\n'.format(i, server, __port__))
+            f.close()
+
+            # reload haproxy's configuration
+            print('Reloading haproxy with servers: ' + ', '.join(new_servers))
+            subprocess.call(['docker', 'kill', '-s', 'HUP', 'haproxy'])
+            EOF
+
+            # Write initial config
+            curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py
+
+            # add a cron job to monitor the metadata and update haproxy
+            crontab -l >_crontab || true
+            echo "* * * * * curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py" >>_crontab
+            crontab <_crontab
+            rm _crontab
+
+            # # Start haproxy Docker
+            docker run -d --name haproxy -p 80:80 -v /etc/haproxy:/usr/local/etc/haproxy:ro $docker_registry/haproxy:latest
+outputs:
+  server_name:
+    description: >
+      List of server names that are part of the group.
+    value: {get_attr: [app_cluster, name]}
+  server_ip:
+    description: >
+      List of server IPs that are part of the group.
+    value: {get_attr: [app_cluster, first_address]}
+  server_id:
+    description: >
+      List of server IDs that are part of the group.
+    value: {get_attr: [app_cluster, refs]}
+  internal_security_group_id:
+    description: Internal Security Group ID for LB
+    value: {get_resource: lb_secgroup_gateway}
+  lb_vm_id:
+    description: LB VM
+    value: {get_resource: load_balancer}
+  lb_name:
+    description: Name of the LB instance.
+    value: {get_attr: [load_balancer, name]}
+  lb_private_ip:
+    description: The IP address of the LB instance.
+    value: {get_attr: [load_balancer, first_address]}
+  lb_floating_ip:
+    description: The IP address of the LB instance.
+    value: {get_attr: [floating_ip, floating_ip_address]}

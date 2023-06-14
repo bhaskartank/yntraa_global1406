@@ -1,0 +1,31 @@
+name: SocketIO - Docker Image CI
+on:
+  push:
+    branches: [ main ]
+    paths: 
+    - 'socketio/**'
+    
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+    - uses: actions/checkout@v2
+    - name: Login to docker hub
+      env:
+        DOCKER_USER: ${{secrets.DOCKERHUB_USER}}
+        DOCKER_PWD: ${{secrets.DOCKERHUB_PUSH_TOKEN}}
+      run: docker login -u $DOCKER_USER -p $DOCKER_PWD
+    - name: Prepare image tag
+      run: echo "TAG=$(date +'%F-%H-%M-%S')" >> $GITHUB_ENV
+    - name: Build docker image for socketio
+      run: docker build socketio/. --file socketio/Dockerfile --tag build/socketio_sso:${{ env.TAG }}    
+    - name: Push the docker image
+      env:
+        DOCKER_USER: ${{secrets.DOCKERHUB_USER}}
+        DOCKER_PWD: ${{secrets.DOCKERHUB_PUSH_TOKEN}}
+      run: |
+        docker tag build/socketio_sso:${{ env.TAG }} coredgeio/socketio_sso:${{ env.TAG }}
+        docker tag build/socketio_sso:${{ env.TAG }} coredgeio/socketio_sso:latest
+        
+        docker push coredgeio/socketio_sso:${{ env.TAG }}
+        docker push coredgeio/socketio_sso:latest

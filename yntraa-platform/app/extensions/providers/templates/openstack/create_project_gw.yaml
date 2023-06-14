@@ -1,0 +1,191 @@
+heat_template_version: newton
+
+description: Yntraa Cloud - deploy GW VM.
+
+parameters:
+  public_net_name:
+    type: string
+    description: public/external net name
+    default: floating_net
+  internal_network_id:
+    type: string
+    description: tenant internal net id
+    default: int_net
+  sec_group_name:
+    type: string
+    description: security group name
+    default: gw_sec_group
+  gw_fixed_ip:
+    type: string
+    description: Gateway Fixed IP
+    default: 192.168.3.254
+  flavor_name:
+    type: string
+    description: Gateway VM flavor name
+    default: gateway-flavor
+  image_name:
+    type: string
+    description: Gateway VM image name
+    default: Docker
+  sshgw_vm_name:
+    type: string
+    description: Gateway VM name
+    default: gwvm
+  sshgw_ssh_port:
+    type: number
+    description: Gateway VM SSH port
+    default: 2222
+  docker_registry:
+    type: string
+    description: Docker registry
+    default: 164.100.61.35:5000
+  boot_vol_size:
+    type: number
+    description: The size of the Cinder boot volume
+    default: 70
+  availability_zone:
+    type: string
+    description: LB availability zone
+    default: nova
+
+resources:
+  secgroup_gateway:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: {get_param: sec_group_name}
+      description: Enable external traffic on SSH.
+      # rules: 
+      # - remote_ip_prefix: 10.26.0.0/16
+      #   protocol: icmp 
+      #   direction: ingress
+      #   port_range_min: 
+      #   port_range_max:
+      # - remote_ip_prefix: 10.26.0.0/16 
+      #   protocol: tcp 
+      #   port_range_min: 8443 
+      #   port_range_max: 8443
+      # - remote_ip_prefix: 10.194.169.0/24
+      #   protocol: tcp 
+      #   port_range_min: 5000 
+      #   port_range_max: 5000
+      # - remote_ip_prefix: 0.0.0.0/0
+      #   protocol: tcp 
+      #   direction: egress
+      #   port_range_min: 1 
+      #   port_range_max: 65535
+      # - remote_ip_prefix: 0.0.0.0/0
+      #   protocol: udp 
+      #   direction: egress
+      #   port_range_min: 1 
+      #   port_range_max: 65535
+
+  floating_ip: 
+    depends_on: [green_port] 
+    type: OS::Neutron::FloatingIP 
+    properties: 
+      floating_network_id: { get_param: public_net_name } 
+      port_id: { get_resource: green_port } 
+  green_port: 
+    type: OS::Neutron::Port 
+    properties: 
+      network: { get_param: internal_network_id }
+      fixed_ips: [{"ip_address": {get_param: gw_fixed_ip}}]
+      security_groups: [{ get_resource: secgroup_gateway }]
+  gw_vol:
+    type: OS::Cinder::Volume
+    properties:
+      size: { get_param: boot_vol_size }
+      image: { get_param: image_name }
+  sshgw_vm: 
+    depends_on: [secgroup_gateway,green_port,gw_vol] 
+    type: OS::Nova::Server 
+    properties: 
+      name: { get_param: sshgw_vm_name }  
+      image: { get_param: image_name } 
+      flavor: { get_param: flavor_name }
+      availability_zone: { get_param: availability_zone }
+      block_device_mapping: [{"volume_id": { get_resource: gw_vol },
+                        "delete_on_termination": false, 
+                        "device_name": "vda"}]
+      networks: 
+      - port: { get_resource: green_port } 
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $vm_name: { get_param: sshgw_vm_name }
+            $sshgw_ssh_port: { get_param: sshgw_ssh_port }
+            $docker_registry: { get_param: docker_registry }
+          template: |
+            #!/bin/bash
+            echo "Configuring HOSTNAME $vm_name"
+            echo "127.0.0.1  ${HOSTNAME} $vm_name" >> /etc/hosts
+            echo "Configuring the SSH GW..."
+            echo "###################################"
+            echo ""
+            sed -i "s/#Port 22/Port $sshgw_ssh_port/" /etc/ssh/sshd_config
+            systemctl restart sshd
+            # write docker registry
+            cat >>/etc/docker/daemon.json <<EOF
+            {
+                "insecure-registries" : ["$docker_registry"]
+            }
+            EOF
+            systemctl daemon-reload
+            systemctl restart docker
+            docker run -p 5000:5000 -d --restart=unless-stopped --name=socat -v /var/run/docker.sock:/var/run/docker.sock $docker_registry/socat
+            
+            docker run -d -p 22:2222 --restart=unless-stopped --name=sshpiper --env SSHPIPERD_UPSTREAM_DRIVER=custom $docker_registry/sshpiper
+            
+            mkdir -p /etc/prometheus
+
+            # write an initial empty list of worker servers
+            cat >>/etc/prometheus/targets.json <<EOF
+            []
+            EOF
+
+            # write the update script
+            cat >>/etc/prometheus/update.py <<EOF
+            import sys
+            import json
+            import subprocess
+
+            # load target list from metadata
+            metadata = json.loads(sys.stdin.read())
+            new_targets = json.loads(metadata.get('meta', {}).get('servers', '[]'))
+            if not new_targets:
+                sys.exit(1)  # bad metadata
+
+            # compare against known list of targets
+            current_targets = json.loads(open('/etc/prometheus/targets.json').read())
+            if current_targets == new_targets:
+                sys.exit(0)  # no changes
+
+            # record updated list of targets
+            open('/etc/prometheus/targets.json', 'wt').write(json.dumps(new_targets))
+            EOF
+            
+            # Write initial config
+            curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/prometheus/update.py
+
+            # add a cron job to monitor the metadata and update prometheus
+            crontab -l >_crontab || true
+            echo "* * * * * curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/prometheus/update.py" >>_crontab
+            crontab <_crontab
+            rm _crontab
+
+            # Create monitoring network
+            docker network create monitoring
+
+            # # Start prometheus Docker
+            docker run -d -p 9200:9090 --name=prometheus --net=monitoring --restart=unless-stopped -v /etc/prometheus/targets.json:/etc/prometheus/targets.json $docker_registry/cloud/prometheus:latest
+
+            # # Start grafana Docker
+            docker run -d -p 8443:3000 --name=grafana --net=monitoring --restart=unless-stopped -e GF_SECURITY_ADMIN_PASSWORD=secret $docker_registry/cloud/grafana:latest
+outputs:
+  internal_security_group_id:
+    description: Internal Security Group ID
+    value: { get_resource: secgroup_gateway }
+  sshgw_vm_id:
+    description: SSH GW VM
+    value: { get_resource: sshgw_vm }
